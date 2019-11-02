@@ -139,7 +139,7 @@ void ask_value_from_array(char question[100], const char *list[], int size, int 
         printf("%d. %s\n", i + 1, list[i]);
     }
 
-    while (scanf(" %d", var) != 1 || *var < 1 || *var > size - 1)
+    while (scanf(" %d", var) != 1 || *var < 1 || *var > size)
     {
         fflush(stdin);
         fseek(stdin, 0, SEEK_END);
@@ -238,7 +238,7 @@ void list_passengers()
         case FILTER_BY_PLACE:
         {
             int place_id;
-            ask_value_from_array("Adja meg a város nevét amire szűrni szeretne: \n", places,sizeof(places)/sizeof(places[0]),&place_id);
+            ask_value_from_array("Adja meg a helyszín nevét amire szűrni szeretne: \n", places,sizeof(places)/sizeof(places[0]),&place_id);
             printf("\n");
             filter_by_place_id(place_id, list);
         }
@@ -258,7 +258,7 @@ int show_list_menu()
     printf("1.\tTörlés\n");
     printf("2.\tMódosítás\n");
     printf("3.\tÚjra listázás\n");
-    printf("4.\tSzűrés város szerint\n");
+    printf("4.\tSzűrés helyszín szerint\n");
     printf("0.\tVissza\n\n");
     printf("Válasszon: ");
 
