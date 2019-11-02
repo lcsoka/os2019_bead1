@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include "linkedlist.h"
 #include "passenger.h"
-#include <time.h>
 #include <string.h>
 
 Node * createnode(PASSENGER* data);

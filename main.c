@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include "passenger.h"
@@ -96,7 +95,6 @@ void add_passenger()
     ask_value_from_array("Adja meg az utazás módját!\n", travel_types, sizeof(travel_types) / sizeof(travel_types[0]), &travel_type_id);
     ask_value_from_array("Adja meg a helyszínt!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
 
-    time_t my_time = time(NULL);
     PASSENGER *p = malloc(sizeof(PASSENGER));
     strcpy(p->name, name);
     strcpy(p->phone, phone);
