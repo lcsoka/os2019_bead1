@@ -5,6 +5,8 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <unistd.h>
 #include "passenger.h"
 #include "linkedlist.h"
@@ -39,7 +41,7 @@ void delete_passenger(int);
 void display(List *list);
 void filter_by_place_id(int place_id, List *list);
 int get_user_ids_for_place(int place_id, List *list, int *);
-int get_place_threshold(int);
+PLACE get_place(int);
 const char *travel_types[3] = {"Repülő", "Hajó", "Autóbusz"};
 const PLACE places[] = {
     {0, "Bali", 2},
@@ -49,17 +51,26 @@ const PLACE places[] = {
     {3, "Izland", 5},
 };
 
+struct success_message
+{
+    long mtype;
+    int data[2];
+};
+
+int send_msg(int, int, int);
+int receive_msg(int);
 void start_expedition(int);
+
 int passenger_manifest_pipe[2];
 
 void request_passenger_manifest(int place_id)
 {
     // Get passengers, send them in a pipe
-    printf("Utaslista elkuldese a(z) %d id-ju helyre\n", place_id);
-    int users[count(list)]; // This array's length is equal to the list's length
+    printf("Utaslista elküldése ide: %s\n", get_place(place_id).name);
+    int users[count(list)];                                          // This array's length is equal to the list's length
     int actual_size = get_user_ids_for_place(place_id, list, users); // Actual passengers on this place (should be equal for place's threshold)
-    int actual_users[actual_size]; // An array for the passengers
-    
+    int actual_users[actual_size];                                   // An array for the passengers
+
     close(passenger_manifest_pipe[0]); // Close read end
 
     // Create correct size array for user ids
@@ -85,11 +96,11 @@ static void handler(int sig, siginfo_t *si, void *ucontext)
     }
     else if (sig == SIGUSR2)
     {
-        printf("SIGUSR2 received");
+        printf("Az expedíció hazatért. Összegzés lekérése üzenetsoron:\n");
     }
     else
     {
-        printf("Other signal captured %d", sig);
+        printf("Other signal captured %d\n", sig);
     }
 }
 
@@ -125,7 +136,6 @@ int main()
         case TEST:
             printf("Indul a mento expedicio!\n");
             start_expedition(0);
-            return 0; // TODO: REMOVE THIS
             break;
         }
         choice = menu();
@@ -227,6 +237,8 @@ void ask_value_from_array(char question[100], const char *list[], int size, int 
     *var = *var - 1;
 }
 
+// This was necessary since I refactored the places to use struct instead of 'string' array
+// That's why this is almost the same method then the 'ask_value_from_array'
 void ask_for_place_id(char question[100], const PLACE list[], int size, int *var)
 {
     printf("%s", question);
@@ -292,7 +304,6 @@ void write_data()
 
     for (; current != NULL; current = current->next)
     {
-        // printf("WRITE: %i\n",current->data->id);
         fwrite(current->data, sizeof(PASSENGER), 1, outfile);
     }
 
@@ -490,16 +501,16 @@ int get_user_ids_for_place(int place_id, List *list, int *users)
     return i;
 }
 
-int get_place_threshold(int place_id)
+PLACE get_place(int place_id)
 {
     for (int i = 0; i < sizeof(places) / sizeof(PLACE); i++)
     {
         if (places[i].id == place_id)
         {
-            return places[i].threshold;
+            return places[i];
         }
     }
-    return 0;
+    return places[0];
 }
 
 void start_expedition(int place_id)
@@ -512,6 +523,15 @@ void start_expedition(int place_id)
         exit(EXIT_FAILURE);
     }
 
+    int message_queue, status;
+    key_t key = ftok("bead2", 1);
+    message_queue = msgget(key, 0600 | IPC_CREAT);
+    if (message_queue < 0)
+    {
+        perror("msgget");
+        exit(EXIT_FAILURE);
+    }
+
     pid_t child = fork();
     if (child > 0)
     {
@@ -519,40 +539,91 @@ void start_expedition(int place_id)
         sigset_t sigset;
         sigfillset(&sigset);
         sigdelset(&sigset, SIGUSR1);
+        sigdelset(&sigset, SIGUSR2);
+        // Wait for SIGUSR1
         sigsuspend(&sigset); //pause
         // There was a signal, from the child which means the handler is now sending the passenger list in a pipe,
         // So we sleep a little
         sleep(1);
+        // Wait for SIGUSR2
+        sigsuspend(&sigset); //pause
 
+        // Receive message through message queue
+        receive_msg(message_queue);
+
+        // Wait for child to end
         int status;
         wait(&status);
-        printf("Parent process ended\n");
+        // printf("Parent process ended\n");
     }
     else
     {
         // Child
         sleep(1);
 
-        // Send a signal to the parent with the place id 
+        // Send a signal to the parent with the place id
         union sigval sv;
         sv.sival_int = place_id;
         sigqueue(getppid(), SIGUSR1, sv);
 
         // Wait for parent handler sending the passenger list
         sleep(1);
-        
+
         close(passenger_manifest_pipe[1]); // Close write end
-        int threshold = get_place_threshold(place_id);
+        int threshold = get_place(place_id).threshold;
         int user_ids[threshold];
-        printf("reading from pipe\n");
+
+        // Read from pipe
         read(passenger_manifest_pipe[0], user_ids, sizeof(user_ids));
         printf("Utaslista:\n");
         for (int i = 0; i < threshold; i++)
         {
-            printf("%d. %s\n",(i+1),getPassengerWithId(user_ids[i],list)->name);
+            printf("%d. %s\n", (i + 1), getPassengerWithId(user_ids[i], list)->name);
         }
         close(passenger_manifest_pipe[0]);
 
-        printf("child end\n");
+        // All passengers are here, now send the info in a message queue to parent
+        // But wait before it
+        sleep(1); // Must wait a little because it can send the kill before the parent is actually waiting for it
+        send_msg(message_queue, place_id, threshold);
+        kill(getppid(), SIGUSR2);
+
+        sleep(1);
+        // Remove the message queue
+        // After terminating child process, the message queue is deleted.
+        status = msgctl(message_queue, IPC_RMID, NULL);
+        if (status < 0)
+        {
+            perror("msgctl");
+        }
+        // printf("child end\n");
+        return;
     }
+}
+
+int send_msg(int message_queue, int place_id, int user_count)
+{
+    const struct success_message msg = {1, {place_id, user_count}};
+    int status = msgsnd(message_queue, &msg, sizeof(msg.data), IPC_NOWAIT);
+    if (status < 0)
+    {
+        perror("msgsnd");
+    }
+    return 0;
+}
+
+int receive_msg(int message_queue)
+{
+    struct success_message msg;
+    int status;
+    status = msgrcv(message_queue, &msg, sizeof(msg.data), 1, 0);
+    if (status < 0)
+    {
+        perror("msgrcv");
+    }
+    else
+    {
+        printf("%s-rol hazahozott emberek száma: %d\n", get_place(msg.data[0]).name, msg.data[1]);
+    }
+    return 0;
 }
