@@ -2,13 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "passenger.h"
 #include "linkedlist.h"
 #include "place.h"
 
 #define ADD_PASSENGER 1
 #define SHOW_PASSENGERS 2
+#define TEST 3
 #define DELETE_PASSENGER 1
 #define MODIFY_PASSENGER 2
 #define LIST_PASSENGERS 3
@@ -34,15 +38,60 @@ void modify_passenger(int);
 void delete_passenger(int);
 void display(List *list);
 void filter_by_place_id(int place_id, List *list);
+int get_user_ids_for_place(int place_id, List *list, int *);
+int get_place_threshold(int);
 const char *travel_types[3] = {"Repülő", "Hajó", "Autóbusz"};
-// const char *places[5] = {"Bali", "Mali", "Cook szigetek", "Bahamák", "Izland"};
 const PLACE places[] = {
-    {0, "Bali", 5},
+    {0, "Bali", 2},
     {1, "Mali", 5},
     {2, "Cook szigetek", 5},
     {3, "Bahamák", 5},
     {3, "Izland", 5},
 };
+
+void start_expedition(int);
+int passenger_manifest_pipe[2];
+
+void request_passenger_manifest(int place_id)
+{
+    // Get passengers, send them in a pipe
+    printf("Utaslista elkuldese a(z) %d id-ju helyre\n", place_id);
+    int users[count(list)]; // This array's length is equal to the list's length
+    int actual_size = get_user_ids_for_place(place_id, list, users); // Actual passengers on this place (should be equal for place's threshold)
+    int actual_users[actual_size]; // An array for the passengers
+    
+    close(passenger_manifest_pipe[0]); // Close read end
+
+    // Create correct size array for user ids
+    for (int i = 0; i < actual_size; i++)
+    {
+        actual_users[i] = users[i];
+    }
+
+    // Send data
+    write(passenger_manifest_pipe[1], actual_users, sizeof(actual_users));
+    close(passenger_manifest_pipe[1]); // Close write end
+}
+
+void send_information_about_expedition()
+{
+}
+
+static void handler(int sig, siginfo_t *si, void *ucontext)
+{
+    if (sig == SIGUSR1)
+    {
+        request_passenger_manifest(si->si_value.sival_int);
+    }
+    else if (sig == SIGUSR2)
+    {
+        printf("SIGUSR2 received");
+    }
+    else
+    {
+        printf("Other signal captured %d", sig);
+    }
+}
 
 int main()
 {
@@ -54,6 +103,15 @@ int main()
     // Create menu
     int choice = menu();
 
+    // Register event handlers
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_sigaction = handler;
+    sa.sa_flags = SA_SIGINFO;
+
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
+
     while (choice != QUIT)
     {
         switch (choice)
@@ -63,6 +121,11 @@ int main()
             break;
         case SHOW_PASSENGERS:
             list_passengers();
+            break;
+        case TEST:
+            printf("Indul a mento expedicio!\n");
+            start_expedition(0);
+            return 0; // TODO: REMOVE THIS
             break;
         }
         choice = menu();
@@ -78,10 +141,11 @@ int menu(void)
     printf("-== Amazing CRUD for unfortunate passengers ==-\n\n");
     printf("1.\tÚj utas felvitele\n");
     printf("2.\tUtasok listázása\n");
+    printf("3.\tTEST - Expedicio inditasa\n");
     printf("0.\tKilépés\n\n");
     printf("Válasszon: ");
 
-    while ((scanf(" %i", &option) != 1) || (option < 0) || (option > 2))
+    while ((scanf(" %i", &option) != 1) || (option < 0) || (option > 3)) // TODO: replace 3 with 2!!!!
     {
         fflush(stdin);
         fseek(stdin, 0, SEEK_END);
@@ -163,7 +227,6 @@ void ask_value_from_array(char question[100], const char *list[], int size, int 
     *var = *var - 1;
 }
 
-
 void ask_for_place_id(char question[100], const PLACE list[], int size, int *var)
 {
     printf("%s", question);
@@ -187,7 +250,6 @@ void ask_for_place_id(char question[100], const PLACE list[], int size, int *var
     // Subtract 1 because we want to save the index of the selected element
     *var = *var - 1;
 }
-
 
 void read_data()
 {
@@ -369,7 +431,7 @@ void display(List *list)
     for (; current != NULL; current = current->next)
     {
         i++;
-        printf("%i. %s %s %s %s\n", i, current->data->name,
+        printf("%i. (%d) %s %s %s %s\n", i, current->data->id, current->data->name,
                current->data->phone,
                travel_types[current->data->travel_type_id],
                places[current->data->place_id].name);
@@ -401,5 +463,96 @@ void filter_by_place_id(int place_id, List *list)
     if (i == 0)
     {
         printf("Nem találhatóak utasok ezen a helyen!\n");
+    }
+}
+
+int get_user_ids_for_place(int place_id, List *list, int *users)
+{
+    Node *current = list->head;
+    int i = 0;
+    int passenger_id = 0;
+
+    if (list->head == NULL)
+    {
+        printf("Nincsenek felvitt utasok!\n");
+        return 0;
+    }
+    for (; current != NULL; current = current->next)
+    {
+
+        if (place_id == current->data->place_id)
+        {
+            users[i] = current->data->id;
+            i++;
+        }
+        passenger_id++;
+    }
+    return i;
+}
+
+int get_place_threshold(int place_id)
+{
+    for (int i = 0; i < sizeof(places) / sizeof(PLACE); i++)
+    {
+        if (places[i].id == place_id)
+        {
+            return places[i].threshold;
+        }
+    }
+    return 0;
+}
+
+void start_expedition(int place_id)
+{
+
+    // Letrehozzuk a pipe-ot
+    if (pipe(passenger_manifest_pipe) == -1)
+    {
+        perror("Hiba a pipe nyitaskor!");
+        exit(EXIT_FAILURE);
+    }
+
+    pid_t child = fork();
+    if (child > 0)
+    {
+        // Parent
+        sigset_t sigset;
+        sigfillset(&sigset);
+        sigdelset(&sigset, SIGUSR1);
+        sigsuspend(&sigset); //pause
+        // There was a signal, from the child which means the handler is now sending the passenger list in a pipe,
+        // So we sleep a little
+        sleep(1);
+
+        int status;
+        wait(&status);
+        printf("Parent process ended\n");
+    }
+    else
+    {
+        // Child
+        sleep(1);
+
+        // Send a signal to the parent with the place id 
+        union sigval sv;
+        sv.sival_int = place_id;
+        sigqueue(getppid(), SIGUSR1, sv);
+
+        // Wait for parent handler sending the passenger list
+        sleep(1);
+        
+        close(passenger_manifest_pipe[1]); // Close write end
+        int threshold = get_place_threshold(place_id);
+        int user_ids[threshold];
+        printf("reading from pipe\n");
+        read(passenger_manifest_pipe[0], user_ids, sizeof(user_ids));
+        printf("Utaslista:\n");
+        for (int i = 0; i < threshold; i++)
+        {
+            printf("%d. %s\n",(i+1),getPassengerWithId(user_ids[i],list)->name);
+        }
+        close(passenger_manifest_pipe[0]);
+
+        printf("child end\n");
     }
 }

@@ -5,14 +5,16 @@
 #include <string.h>
 
 Node * createnode(PASSENGER* data);
-
+int global_id = 0;
 Node * createnode(PASSENGER* data){
   Node * newNode = malloc(sizeof(Node));
   if (!newNode) {
     return NULL;
   }
   newNode->data = data;
+  newNode->data->id = global_id;
   newNode->next = NULL;
+  global_id++;
   return newNode;
 }
 
@@ -29,11 +31,13 @@ PASSENGER * getNthPassenger(int index, List * list) {
   Node * current = list->head;
   // List is empty
   if(list->head == NULL){
+    printf("couldn\'t find head");
     return NULL;
   }
 
   // Index bigger than actual list
   if (count(list) < index){
+    printf("Index is out of bounds");
     return NULL;
   } 
   int i = 0;
@@ -41,6 +45,26 @@ PASSENGER * getNthPassenger(int index, List * list) {
   for(; current != NULL; current = current->next) {
     i++;
     if(i == index){
+      printf("found passenger");
+      passenger = current->data;
+    }
+  }
+  return passenger;
+}
+
+
+PASSENGER * getPassengerWithId(int id, List * list) {
+  Node * current = list->head;
+  // List is empty
+  if(list->head == NULL){
+    return NULL;
+  }
+
+  int i = 0;
+  PASSENGER * passenger;
+  for(; current != NULL; current = current->next) {
+    i++;
+    if(current->data->id == id){
       passenger = current->data;
     }
   }
