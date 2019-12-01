@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include "passenger.h"
 #include "linkedlist.h"
+#include "place.h"
 
 #define ADD_PASSENGER 1
 #define SHOW_PASSENGERS 2
@@ -25,15 +26,23 @@ void add_passenger();
 void ask_for_string_value(char[100], char *);
 void ask_for_int_value(char[100], int *);
 void ask_value_from_array(char[100], const char *[], int, int *);
+void ask_for_place_id(char[100], const PLACE[], int, int *);
 void write_data();
 void read_data();
 void list_passengers();
 void modify_passenger(int);
 void delete_passenger(int);
-void display(List * list);
-void filter_by_place_id(int place_id, List * list);
+void display(List *list);
+void filter_by_place_id(int place_id, List *list);
 const char *travel_types[3] = {"Repülő", "Hajó", "Autóbusz"};
-const char *places[5] = {"Bali", "Mali", "Cook szigetek", "Bahamák", "Izland"};
+// const char *places[5] = {"Bali", "Mali", "Cook szigetek", "Bahamák", "Izland"};
+const PLACE places[] = {
+    {0, "Bali", 5},
+    {1, "Mali", 5},
+    {2, "Cook szigetek", 5},
+    {3, "Bahamák", 5},
+    {3, "Izland", 5},
+};
 
 int main()
 {
@@ -93,7 +102,7 @@ void add_passenger()
     ask_for_string_value("Adja meg a nevet: ", &name[0]);
     ask_for_string_value("Adja meg a telefonszámot: ", &phone[0]);
     ask_value_from_array("Adja meg az utazás módját!\n", travel_types, sizeof(travel_types) / sizeof(travel_types[0]), &travel_type_id);
-    ask_value_from_array("Adja meg a helyszínt!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
+    ask_for_place_id("Adja meg a helyszínt!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
 
     PASSENGER *p = malloc(sizeof(PASSENGER));
     strcpy(p->name, name);
@@ -153,6 +162,32 @@ void ask_value_from_array(char question[100], const char *list[], int size, int 
     // Subtract 1 because we want to save the index of the selected element
     *var = *var - 1;
 }
+
+
+void ask_for_place_id(char question[100], const PLACE list[], int size, int *var)
+{
+    printf("%s", question);
+
+    for (int i = 0; i < size; i++)
+    {
+        printf("%d. %s\n", i + 1, list[i].name);
+    }
+
+    while (scanf(" %d", var) != 1 || *var < 1 || *var > size)
+    {
+        fflush(stdin);
+        fseek(stdin, 0, SEEK_END);
+        printf("Hibás paraméter! Válasszon újra!\n\n");
+        printf("%s", question);
+        for (int i = 0; i < size; i++)
+        {
+            printf("%d. %s\n", i + 1, list[i].name);
+        }
+    }
+    // Subtract 1 because we want to save the index of the selected element
+    *var = *var - 1;
+}
+
 
 void read_data()
 {
@@ -238,7 +273,7 @@ void list_passengers()
         case FILTER_BY_PLACE:
         {
             int place_id;
-            ask_value_from_array("Adja meg a helyszín nevét amire szűrni szeretne: \n", places,sizeof(places)/sizeof(places[0]),&place_id);
+            ask_for_place_id("Adja meg a helyszín nevét amire szűrni szeretne: \n", places, sizeof(places) / sizeof(places[0]), &place_id);
             printf("\n");
             filter_by_place_id(place_id, list);
         }
@@ -294,8 +329,8 @@ void modify_passenger(int i)
         ask_for_string_value("Adja meg a telefonszámot: ", &phone[0]);
         printf("(%s)\n", travel_types[p->travel_type_id]);
         ask_value_from_array("Adja meg az utazás módját!\n", travel_types, sizeof(travel_types) / sizeof(travel_types[0]), &travel_type_id);
-        printf("(%s)\n", places[p->place_id]);
-        ask_value_from_array("Adja meg a helyszínt!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
+        printf("(%s)\n", places[p->place_id].name);
+        ask_for_place_id("Adja meg a helyszínt!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
 
         strcpy(p->name, name);
         strcpy(p->phone, phone);
@@ -337,7 +372,7 @@ void display(List *list)
         printf("%i. %s %s %s %s\n", i, current->data->name,
                current->data->phone,
                travel_types[current->data->travel_type_id],
-               places[current->data->place_id]);
+               places[current->data->place_id].name);
     }
 }
 
@@ -359,11 +394,12 @@ void filter_by_place_id(int place_id, List *list)
             printf("%i. %s %s %s %s\n", i, current->data->name,
                    current->data->phone,
                    travel_types[current->data->travel_type_id],
-                   places[current->data->place_id]);
+                   places[current->data->place_id].name);
         }
     }
 
-    if(i == 0) {
+    if (i == 0)
+    {
         printf("Nem találhatóak utasok ezen a helyen!\n");
     }
 }
