@@ -28,6 +28,7 @@
 List *list;
 int menu();
 int show_list_menu();
+void force_expedition();
 void add_passenger();
 void ask_for_string_value(char[100], char *);
 void ask_for_int_value(char[100], int *);
@@ -41,20 +42,22 @@ void delete_passenger(int);
 void display(List *list);
 void filter_by_place_id(int place_id, List *list);
 int get_user_ids_for_place(int place_id, List *list, int *);
+int get_user_count_for_place(int place_id, List *list);
 PLACE get_place(int);
+int can_start_expedition(int);
 const char *travel_types[3] = {"Repülő", "Hajó", "Autóbusz"};
 const PLACE places[] = {
     {0, "Bali", 2},
-    {1, "Mali", 5},
-    {2, "Cook szigetek", 5},
-    {3, "Bahamák", 5},
+    {1, "Mali", 3},
+    {2, "Cook szigetek", 3},
+    {3, "Bahamák", 3},
     {3, "Izland", 5},
 };
 
 struct success_message
 {
     long mtype;
-    int data[2];
+    int data[2]; // First int = place_id, second int = passenger count
 };
 
 int send_msg(int, int, int);
@@ -66,7 +69,7 @@ int passenger_manifest_pipe[2];
 void request_passenger_manifest(int place_id)
 {
     // Get passengers, send them in a pipe
-    printf("Utaslista elküldése ide: %s\n", get_place(place_id).name);
+    printf("Utaslista elküldése csővezetéken keresztül ide: %s\n", get_place(place_id).name);
     int users[count(list)];                                          // This array's length is equal to the list's length
     int actual_size = get_user_ids_for_place(place_id, list, users); // Actual passengers on this place (should be equal for place's threshold)
     int actual_users[actual_size];                                   // An array for the passengers
@@ -82,10 +85,6 @@ void request_passenger_manifest(int place_id)
     // Send data
     write(passenger_manifest_pipe[1], actual_users, sizeof(actual_users));
     close(passenger_manifest_pipe[1]); // Close write end
-}
-
-void send_information_about_expedition()
-{
 }
 
 static void handler(int sig, siginfo_t *si, void *ucontext)
@@ -134,8 +133,7 @@ int main()
             list_passengers();
             break;
         case TEST:
-            printf("Indul a mento expedicio!\n");
-            start_expedition(0);
+            force_expedition();
             break;
         }
         choice = menu();
@@ -151,11 +149,11 @@ int menu(void)
     printf("-== Amazing CRUD for unfortunate passengers ==-\n\n");
     printf("1.\tÚj utas felvitele\n");
     printf("2.\tUtasok listázása\n");
-    printf("3.\tTEST - Expedicio inditasa\n");
+    printf("3.\tExpedíció indítása\n");
     printf("0.\tKilépés\n\n");
     printf("Válasszon: ");
 
-    while ((scanf(" %i", &option) != 1) || (option < 0) || (option > 3)) // TODO: replace 3 with 2!!!!
+    while ((scanf(" %i", &option) != 1) || (option < 0) || (option > 3))
     {
         fflush(stdin);
         fseek(stdin, 0, SEEK_END);
@@ -187,6 +185,13 @@ void add_passenger()
 
     // Save it
     write_data();
+}
+
+void force_expedition()
+{
+    int place_id;
+    ask_for_place_id("Adja meg a ahonnan mentőexpedíciót szeretne indítani!\n", places, sizeof(places) / sizeof(places[0]), &place_id);
+    start_expedition(place_id);
 }
 
 void ask_for_string_value(char question[100], char *var)
@@ -442,7 +447,7 @@ void display(List *list)
     for (; current != NULL; current = current->next)
     {
         i++;
-        printf("%i. (%d) %s %s %s %s\n", i, current->data->id, current->data->name,
+        printf("%i. %s %s %s %s\n", i, current->data->name,
                current->data->phone,
                travel_types[current->data->travel_type_id],
                places[current->data->place_id].name);
@@ -501,6 +506,30 @@ int get_user_ids_for_place(int place_id, List *list, int *users)
     return i;
 }
 
+// Code duplication again... But it's 23:22 in the evening and i don't really care. Sorry
+int get_user_count_for_place(int place_id, List *list)
+{
+    Node *current = list->head;
+    int i = 0;
+    int passenger_id = 0;
+
+    if (list->head == NULL)
+    {
+        printf("Nincsenek felvitt utasok!\n");
+        return 0;
+    }
+    for (; current != NULL; current = current->next)
+    {
+
+        if (place_id == current->data->place_id)
+        {
+            i++;
+        }
+        passenger_id++;
+    }
+    return i;
+}
+
 PLACE get_place(int place_id)
 {
     for (int i = 0; i < sizeof(places) / sizeof(PLACE); i++)
@@ -513,9 +542,27 @@ PLACE get_place(int place_id)
     return places[0];
 }
 
+int can_start_expedition(int place_id)
+{
+    int users[count(list)];
+    int actual_size = get_user_ids_for_place(place_id, list, users);
+    if (actual_size < get_place(place_id).threshold)
+    {
+        return -1;
+    }
+    return 0;
+}
+
 void start_expedition(int place_id)
 {
+    // Check if expedition can be started
+    if (can_start_expedition(place_id) < 0)
+    {
+        printf("Még nincs elég utas a mentőexpedícióhoz! (Min. %d)\n", get_place(place_id).threshold);
+        return;
+    }
 
+    printf("Indul a mentő expedíció!\n");
     // Letrehozzuk a pipe-ot
     if (pipe(passenger_manifest_pipe) == -1)
     {
@@ -524,7 +571,9 @@ void start_expedition(int place_id)
     }
 
     int message_queue, status;
-    key_t key = ftok("bead2", 1);
+    char *path = "/tmp";
+    key_t key;
+    key = ftok(path, 1);
     message_queue = msgget(key, 0600 | IPC_CREAT);
     if (message_queue < 0)
     {
@@ -554,7 +603,7 @@ void start_expedition(int place_id)
         // Wait for child to end
         int status;
         wait(&status);
-        // printf("Parent process ended\n");
+        printf("Mentőexpedíció vége!\n\n");
     }
     else
     {
@@ -570,13 +619,13 @@ void start_expedition(int place_id)
         sleep(1);
 
         close(passenger_manifest_pipe[1]); // Close write end
-        int threshold = get_place(place_id).threshold;
-        int user_ids[threshold];
+        int user_count = get_user_count_for_place(place_id, list);
+        int user_ids[user_count];
 
         // Read from pipe
         read(passenger_manifest_pipe[0], user_ids, sizeof(user_ids));
-        printf("Utaslista:\n");
-        for (int i = 0; i < threshold; i++)
+        printf("Utaslista megérkezett:\n");
+        for (int i = 0; i < user_count; i++)
         {
             printf("%d. %s\n", (i + 1), getPassengerWithId(user_ids[i], list)->name);
         }
@@ -585,7 +634,7 @@ void start_expedition(int place_id)
         // All passengers are here, now send the info in a message queue to parent
         // But wait before it
         sleep(1); // Must wait a little because it can send the kill before the parent is actually waiting for it
-        send_msg(message_queue, place_id, threshold);
+        send_msg(message_queue, place_id, user_count);
         kill(getppid(), SIGUSR2);
 
         sleep(1);
