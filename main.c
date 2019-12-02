@@ -51,7 +51,7 @@ const PLACE places[] = {
     {1, "Mali", 3},
     {2, "Cook szigetek", 3},
     {3, "Bahamák", 3},
-    {3, "Izland", 5},
+    {4, "Izland", 5},
 };
 
 struct success_message
